@@ -1,16 +1,18 @@
 [package]
-name = "dat-incognito-org"
+name = "bulletproofs-test"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "newbp"
+crate-type = ["staticlib"]
 
 [dependencies]
 bulletproofs = { path = "../../dalek-cryptography/bulletproofs" }
 curve25519-dalek = {}
 merlin = { version = "2", default-features = false }
 rand = { version = "0.7", default-features = false }
+safer-ffi = { version = "0.0.6", features = ["proc_macros"] }
 
-[lib]
-name = "newbp"
-crate-type = ["dylib"]
+[features]
+c-headers = ["safer-ffi/headers"]

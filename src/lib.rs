@@ -1,14 +1,15 @@
-extern crate bulletproofs;
-extern crate curve25519_dalek;
-extern crate merlin;
 extern crate rand;
-use bulletproofs::*;
-use curve25519_dalek::scalar::Scalar;
-use merlin::Transcript;
 use rand::thread_rng;
+extern crate curve25519_dalek;
+use curve25519_dalek::scalar::Scalar;
+extern crate merlin;
+use merlin::Transcript;
+extern crate bulletproofs;
+use bulletproofs::{BulletproofGens, PedersenGens, RangeProof};
+use ::safer_ffi::prelude::*;
 
-#[no_mangle]
-pub extern fn naive_prove() {
+#[ffi_export]
+fn naive_prove() -> repr_c::Vec<u8> {
     println!("i will start proving!");
     let pc_gens = PedersenGens::default();
 
@@ -35,10 +36,18 @@ pub extern fn naive_prove() {
         &blinding,
         64,
     ).expect("A real program could handle errors");
-    println!("{:?}", proof);
-    println!("{:?}", committed_value);
+    println!("before return");
+    proof.to_bytes().into()
 }
 
 pub extern fn naive_verify() {
     println!("i will start verifying!");
+}
+
+#[::safer_ffi::cfg_headers]
+#[test]
+fn generate_headers() -> ::std::io::Result<()> {
+    ::safer_ffi::headers::builder()
+        .to_file("ext.h")?
+        .generate()
 }
