@@ -23,6 +23,34 @@ extern "C" {
  */
 typedef struct {
 
+    uint64_t * ptr;
+
+    size_t len;
+
+    size_t cap;
+
+} Vec_uint64_t;
+
+typedef struct { uint8_t idx[32]; } uint8_32_array_t;
+
+/** \brief
+ *  Same as [`Vec<T>`][`rust::Vec`], but with guaranteed `#[repr(C)]` layout
+ */
+typedef struct {
+
+    uint8_32_array_t * ptr;
+
+    size_t len;
+
+    size_t cap;
+
+} Vec_uint8_32_array_t;
+
+/** \brief
+ *  Same as [`Vec<T>`][`rust::Vec`], but with guaranteed `#[repr(C)]` layout
+ */
+typedef struct {
+
     uint8_t * ptr;
 
     size_t len;
@@ -31,7 +59,9 @@ typedef struct {
 
 } Vec_uint8_t;
 
-Vec_uint8_t naive_prove (void);
+Vec_uint8_t bulletproofs_prove_multiple (
+    Vec_uint64_t const * witness,
+    Vec_uint8_32_array_t const * blindings);
 
 
 #ifdef __cplusplus

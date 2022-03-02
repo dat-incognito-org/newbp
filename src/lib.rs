@@ -8,40 +8,35 @@ extern crate bulletproofs;
 use bulletproofs::{BulletproofGens, PedersenGens, RangeProof};
 use ::safer_ffi::prelude::*;
 
+// need & in params to avoid dropping vecs, causing segfault form C.
+// missing padding for non-pow-of-2 witness sets
 #[ffi_export]
-fn naive_prove() -> repr_c::Vec<u8> {
-    println!("i will start proving!");
-    let pc_gens = PedersenGens::default();
-
+fn bulletproofs_prove_multiple(witness: &repr_c::Vec<u64>, blindings: &repr_c::Vec<[u8; 32]>) -> repr_c::Vec<u8> {
+    // clone witness values from input parameters
+    let witness_values:Vec<u64> = witness.to_vec();
+    // The API takes a blinding factor for the commitment.
+    let mut blindings_values:Vec<Scalar> = vec![];
+    for s in blindings.iter() {
+        blindings_values.push(Scalar::from_bytes_mod_order(*s));
+    }
     // Generators for Bulletproofs, valid for proofs up to bitsize 64
     // and aggregation size up to 1.
-    let bp_gens = BulletproofGens::new(64, 1);
+    let pc_gens = PedersenGens::default();
+    let bp_gens = BulletproofGens::new(64, witness_values.len());
 
-    // A secret value we want to prove lies in the range [0, 2^32)
-    let secret_value = 1037574391u64;
-
-    // The API takes a blinding factor for the commitment.
-    let blinding = Scalar::random(&mut thread_rng());
-
-    // The proof can be chained to an existing transcript.
-    // Here we create a transcript with a doctest domain separator.
-    let mut prover_transcript = Transcript::new(b"doctest example");
-
-    // Create a 32-bit rangeproof.
-    let (proof, committed_value) = RangeProof::prove_single(
+    let mut prover_transcript = Transcript::new(b"");
+    let (proof, committed_value) = RangeProof::prove_multiple(
         &bp_gens,
         &pc_gens,
         &mut prover_transcript,
-        secret_value,
-        &blinding,
+        &witness_values,
+        &blindings_values,
         64,
     ).expect("A real program could handle errors");
-    println!("before return");
     proof.to_bytes().into()
 }
 
 pub extern fn naive_verify() {
-    println!("i will start verifying!");
 }
 
 #[::safer_ffi::cfg_headers]
