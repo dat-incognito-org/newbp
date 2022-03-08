@@ -38,6 +38,17 @@ func computeHPrime(y *operation.Scalar, N int, H []*operation.Point) []*operatio
 	return HPrime
 }
 
+func prepareHPrime(y *operation.Scalar, N int, H []*operation.Point) *msMultBuilder {
+	result := NewMSMultBuilder(true)
+	yInverse := new(operation.Scalar).Invert(y)
+	expyInverse := new(operation.Scalar).FromUint64(1)
+	for i := 0; i < N; i++ {
+		result.AppendSingle(operation.NewScalar().Set(expyInverse), H[i])
+		expyInverse.Mul(expyInverse, yInverse)
+	}
+	return result
+}
+
 //nolint:gocritic // This function uses capitalized variable name
 func computeDeltaYZ(z, zSquare *operation.Scalar, yVector []*operation.Scalar, N int) (*operation.Scalar, error) {
 	oneNumber := new(operation.Scalar).FromUint64(1)
@@ -158,14 +169,80 @@ func vectorMulScalar(v []*operation.Scalar, s *operation.Scalar) []*operation.Sc
 }
 
 // CommitAll commits a list of PCM_CAPACITY value(s)
-func encodeVectors(l []*operation.Scalar, r []*operation.Scalar, g []*operation.Point, h []*operation.Point) (*operation.Point, error) {
+func encodeVectors(l []*operation.Scalar, r []*operation.Scalar, g []*operation.Point, h []*operation.Point, b *msMultBuilder) (*msMultBuilder, error) {
 	if len(l) != len(r) || len(g) != len(l) || len(h) != len(g) {
 		return nil, fmt.Errorf("invalid input")
 	}
-	tmp1 := new(operation.Point).MultiScalarMult(l, g)
-	tmp2 := new(operation.Point).MultiScalarMult(r, h)
-	res := new(operation.Point).Add(tmp1, tmp2)
-	return res, nil
+	err := b.Append(l, g)
+	if err != nil {
+		return nil, err
+	}
+	err = b.Append(r, h)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// msMultBuilder is a helper struct to make best use of MultiScalarMult functions. It assumes caller never passes "nil" scalars / points
+type msMultBuilder struct {
+	scalars []*operation.Scalar
+	points []*operation.Point
+	useVarTime bool
+}
+
+func NewMSMultBuilder(_useVarTime bool) *msMultBuilder {
+	return &msMultBuilder{
+		useVarTime: _useVarTime,
+		scalars: []*operation.Scalar{},
+		points: []*operation.Point{},
+	}
+}
+
+func (b *msMultBuilder) Clone() *msMultBuilder {
+	scLst := make([]*operation.Scalar, len(b.scalars))
+	pLst := make([]*operation.Point, len(b.scalars))
+	for i := range scLst {
+		scLst[i] = operation.NewScalar().Set(b.scalars[i])
+		pLst[i] = operation.NewGeneratorPoint().Set(b.points[i])
+	}
+	return &msMultBuilder{
+		useVarTime: b.useVarTime,
+		scalars: scLst,
+		points: pLst,
+	}
+}
+
+func (b *msMultBuilder) Append(scLst []*operation.Scalar, pLst []*operation.Point) error {
+	if len(scLst) != len(pLst) {
+		return fmt.Errorf("msMultBuilder must take same-length slices")
+	}
+	b.scalars = append(b.scalars, scLst...)
+	b.points = append(b.points, pLst...)
+	return nil
+}
+
+func (b *msMultBuilder) AppendSingle(sc *operation.Scalar, p *operation.Point) {
+	b.Append([]*operation.Scalar{sc}, []*operation.Point{p})
+}
+
+func (b *msMultBuilder) AppendWithMultiplier(scLst []*operation.Scalar, pLst []*operation.Point, n *operation.Scalar) error {
+	var newScLst []*operation.Scalar
+	for _, sc := range scLst {
+		newScLst = append(newScLst, operation.NewScalar().Mul(sc, n))
+	}
+	return b.Append(newScLst, pLst)
+}
+
+func (b *msMultBuilder) Execute() (result *operation.Point) {
+	if b.useVarTime {
+		result = operation.NewIdentityPoint().VarTimeMultiScalarMult(b.scalars, b.points)
+	} else {
+		result = operation.NewIdentityPoint().MultiScalarMult(b.scalars, b.points)
+	}
+	// reset builder after finalization
+	*b = *NewMSMultBuilder(b.useVarTime)
+	return result
 }
 
 // bulletproofParams includes all generator for aggregated range proof

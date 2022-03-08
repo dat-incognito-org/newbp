@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"filippo.io/edwards25519"
+	operation_old "github.com/incognitochain/incognito-chain/privacy/operation"
 )
 
 type Point struct {
@@ -13,7 +14,7 @@ type Point struct {
 
 func RandomPoint() *Point {
 	sc := RandomScalar()
-	return new(Point).ScalarMultBase(sc)
+	return NewIdentityPoint().ScalarMultBase(sc)
 }
 
 func NewGeneratorPoint() *Point {
@@ -37,7 +38,9 @@ func (p Point) PointValid() bool {
 }
 
 func (p *Point) Set(q *Point) *Point {
-	p.p.Set(&q.p)
+	temp := edwards25519.NewIdentityPoint()
+	temp.Set(&q.p)
+	p.p = *temp
 	return p
 }
 
@@ -111,12 +114,16 @@ func (p Point) IsIdentity() bool {
 
 // does a * G where a is a scalar and G is the curve basepoint
 func (p *Point) ScalarMultBase(a *Scalar) *Point {
-	p.p.ScalarBaseMult(&a.s)
+	temp := edwards25519.NewIdentityPoint()
+	temp.ScalarBaseMult(&a.s)
+	p.p = *temp
 	return p
 }
 
 func (p *Point) ScalarMult(pa *Point, a *Scalar) *Point {
-	p.p.ScalarMult(&a.s, &pa.p)
+	temp := edwards25519.NewIdentityPoint()
+	temp.ScalarMult(&a.s, &pa.p)
+	p.p = *temp
 	return p
 }
 
@@ -133,7 +140,9 @@ func (p *Point) MultiScalarMult(scalarLs []*Scalar, pointLs []*Point) *Point {
 		scalarKeyLs[i] = &scalarLs[i].s
 		pointKeyLs[i] = &pointLs[i].p
 	}
-	p.p.MultiScalarMult(scalarKeyLs, pointKeyLs)
+	temp := edwards25519.NewIdentityPoint()
+	temp.MultiScalarMult(scalarKeyLs, pointKeyLs)
+	p.p = *temp
 	return p
 }
 
@@ -150,7 +159,9 @@ func (p *Point) VarTimeMultiScalarMult(scalarLs []*Scalar, pointLs []*Point) *Po
 		scalarKeyLs[i] = &scalarLs[i].s
 		pointKeyLs[i] = &pointLs[i].p
 	}
-	p.p.VarTimeMultiScalarMult(scalarKeyLs, pointKeyLs)
+	temp := edwards25519.NewIdentityPoint()
+	temp.VarTimeMultiScalarMult(scalarKeyLs, pointKeyLs)
+	p.p = *temp
 	return p
 }
 
@@ -175,56 +186,35 @@ func (p *Point) VarTimeMultiScalarMult(scalarLs []*Scalar, pointLs []*Point) *Po
 // }
 
 func (p *Point) Add(pa, pb *Point) *Point {
-	p.p.Add(&pa.p, &pb.p)
+	temp := edwards25519.NewIdentityPoint()
+	temp.Add(&pa.p, &pb.p)
+	p.p = *temp
 	return p
 }
 
 // aA + bB
 func (p *Point) AddPedersen(a *Scalar, A *Point, b *Scalar, B *Point) *Point {
-	return p.VarTimeMultiScalarMult([]*Scalar{a, b}, []*Point{A, B})
+	result := NewIdentityPoint().MultiScalarMult([]*Scalar{a, b}, []*Point{A, B})
+	p = result
+	return result
 }
-
-// func (p *Point) AddPedersenCached(a *Scalar, APreCompute [8]C25519.CachedGroupElement, b *Scalar, BPreCompute [8]C25519.CachedGroupElement) *Point {
-// 	if p == nil {
-// 		p = new(Point)
-// 	}
-
-// 	var key C25519.Key
-// 	C25519.AddKeys3_3(&key, &a.key, &APreCompute, &b.key, &BPreCompute)
-// 	p.key = key
-// 	return p
-// }
-
-// func (p *Point) Sub(pa, pb *Point) *Point {
-// 	if p == nil {
-// 		p = new(Point)
-// 	}
-// 	res := p.key
-// 	C25519.SubKeys(&res, &pa.key, &pb.key)
-// 	p.key = res
-// 	return p
-// }
 
 func IsPointEqual(pa *Point, pb *Point) bool {
 	return pa.p.Equal(&pb.p) == 1
 }
 
 func HashToPointFromIndex(index int64, padStr string) *Point {
-	msg := edwards25519.NewGeneratorPoint().Bytes()[:]
+	msg := edwards25519.NewGeneratorPoint().Bytes()
 	msg = append(msg, []byte(padStr)...)
 	msg = append(msg, []byte(string(index))...)
-	h := Keccak256(msg)
 
-	return HashToPoint(h[:])
+	return HashToPoint(msg)
 }
 
+// legacy map-to-point
 func HashToPoint(b []byte) *Point {
-	// h := Keccak256(b)
-	// h = Keccak256(h[:])
-	// sc := (&Scalar{}).FromBytesS(h)
-	// if err != nil {
-	// 	panic(fmt.Errorf("unexpected. will fix %v", err))
-	// }
-	// TODO: use legacy mapper
-	return  (&Point{}).ScalarMultBase(HashToScalar(b))
+	temp := operation_old.HashToPoint(b)
+	result := &Point{}
+	result.FromBytesS(temp.ToBytesS())
+	return result
 }

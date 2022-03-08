@@ -25,14 +25,13 @@ func NewPedersenParams() PedersenCommitment {
 	var pcm PedersenCommitment
 	const capacity = 5 // fixed value = 5
 	pcm.G = make([]*Point, capacity)
-	pcm.G[0] = new(Point).ScalarMultBase(new(Scalar).FromUint64(1))
+	pcm.G[0] = NewIdentityPoint().ScalarMultBase(new(Scalar).FromUint64(1))
 
 	for i := 1; i < len(pcm.G); i++ {
 		pcm.G[i] = HashToPointFromIndex(int64(i), CStringBulletProof)
 	}
-	GBase = new(Point).Set(pcm.G[1])
-	HBase = new(Point).Set(pcm.G[4])
-	fmt.Printf("199G is %s\n", string(new(Point).ScalarMultBase(new(Scalar).FromUint64(199)).MarshalText()))
+	GBase = NewIdentityPoint().Set(pcm.G[1])
+	HBase = NewIdentityPoint().Set(pcm.G[4])
 	return pcm
 }
 
@@ -42,10 +41,10 @@ func (com PedersenCommitment) CommitAll(openings []*Scalar) (*Point, error) {
 		return nil, fmt.Errorf("invalid length of openings to commit")
 	}
 
-	commitment := new(Point).ScalarMult(com.G[0], openings[0])
+	commitment := NewIdentityPoint().ScalarMult(com.G[0], openings[0])
 
 	for i := 1; i < len(com.G); i++ {
-		commitment.Add(commitment, new(Point).ScalarMult(com.G[i], openings[i]))
+		commitment.Add(commitment, NewIdentityPoint().ScalarMult(com.G[i], openings[i]))
 	}
 	return commitment, nil
 }
@@ -53,5 +52,5 @@ func (com PedersenCommitment) CommitAll(openings []*Scalar) (*Point, error) {
 // CommitAtIndex commits specific value with index and returns 34 bytes
 // g^v x h^rand
 func (com PedersenCommitment) CommitAtIndex(value, rand *Scalar, index byte) *Point {
-	return new(Point).AddPedersen(value, com.G[index], rand, com.G[PedersenRandomnessIndex])
+	return NewIdentityPoint().AddPedersen(value, com.G[index], rand, com.G[PedersenRandomnessIndex])
 }

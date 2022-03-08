@@ -8,11 +8,20 @@ import (
 	"sort"
 
 	"filippo.io/edwards25519"
+	operation_old "github.com/incognitochain/incognito-chain/privacy/operation"
 )
 
 type Scalar struct {
 	s edwards25519.Scalar
 }
+
+func NewScalar() *Scalar{
+	return &Scalar{ *edwards25519.NewScalar() }
+}
+
+var ScZero = NewScalar().FromUint64(0)
+var ScOne = NewScalar().FromUint64(1)
+var ScMinusOne = NewScalar().Sub(ScZero, ScOne)
 
 func (sc Scalar) String() string {
 	return fmt.Sprintf("%x", sc.ToBytesS())
@@ -37,7 +46,7 @@ func (sc Scalar) ToBytesS() []byte {
 func (sc *Scalar) FromBytesS(b []byte) *Scalar {
 	var array [Ed25519KeySize]byte
 	copy(array[:], b)
-	sc.s.SetBytesWithClamping(array[:])
+	sc.s.SetCanonicalBytes(array[:])
 	return sc
 }
 
@@ -65,9 +74,9 @@ func RandomScalar() *Scalar {
 }
 
 func HashToScalar(data []byte) *Scalar {
-	h := Keccak256(data)
+	temp := operation_old.HashToScalar(data)
 	// h = Keccak256(h[:])
-	sc := (&Scalar{}).FromBytesS(h[:])
+	sc := (&Scalar{}).FromBytesS(temp.ToBytesS())
 	return sc
 }
 
@@ -179,7 +188,7 @@ func CheckDuplicateScalarArray(arr []*Scalar) bool {
 }
 
 func (sc *Scalar) Invert(a *Scalar) *Scalar {
-	sc.s.Invert(&sc.s)
+	sc.s.Invert(&a.s)
 	return sc
 }
 

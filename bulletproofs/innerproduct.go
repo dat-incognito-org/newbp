@@ -166,18 +166,21 @@ func (wit InnerProductWitness) Prove(GParam []*operation.Point, HParam []*operat
 			return nil, err
 		}
 
-		L, err := encodeVectors(a[:nPrime], b[nPrime:], G[nPrime:], H[:nPrime])
+		msmBuilder := NewMSMultBuilder(false)
+		msmBuilder, err = encodeVectors(a[:nPrime], b[nPrime:], G[nPrime:], H[:nPrime], msmBuilder)
 		if err != nil {
 			return nil, err
 		}
-		L.Add(L, new(operation.Point).ScalarMult(uParam, cL))
+		msmBuilder.AppendSingle(cL, uParam)
+		L := msmBuilder.Execute()
 		proof.l = append(proof.l, L)
 
-		R, err := encodeVectors(a[nPrime:], b[:nPrime], G[:nPrime], H[nPrime:])
+		msmBuilder, err = encodeVectors(a[nPrime:], b[:nPrime], G[:nPrime], H[nPrime:], msmBuilder)
 		if err != nil {
 			return nil, err
 		}
-		R.Add(R, new(operation.Point).ScalarMult(uParam, cR))
+		msmBuilder.AppendSingle(cR, uParam)
+		R := msmBuilder.Execute()
 		proof.r = append(proof.r, R)
 
 		x := generateChallenge(hashCache, []*operation.Point{L, R})

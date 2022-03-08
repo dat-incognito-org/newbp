@@ -271,18 +271,22 @@ func (wit AggregatedRangeWitness) Prove() (*AggregatedRangeProof, error) {
 	// Commitment to aL, aR: A = h^alpha * G^aL * H^aR
 	// Commitment to sL, sR : S = h^rho * G^sL * H^sR
 	var alpha, rho *operation.Scalar
-	if A, err := encodeVectors(aL, aR, aggParam.g, aggParam.h); err != nil {
+	alpha = operation.RandomScalar()
+	rho = operation.RandomScalar()
+	msmBuilder := NewMSMultBuilder(false)
+	_, err := encodeVectors(aL, aR, aggParam.g, aggParam.h, msmBuilder)
+	if err != nil {
 		return nil, err
-	} else if S, err := encodeVectors(sL, sR, aggParam.g, aggParam.h); err != nil {
-		return nil, err
-	} else {
-		alpha = operation.RandomScalar()
-		rho = operation.RandomScalar()
-		A.Add(A, new(operation.Point).ScalarMult(operation.HBase, alpha))
-		S.Add(S, new(operation.Point).ScalarMult(operation.HBase, rho))
-		proof.a = A
-		proof.s = S
 	}
+	msmBuilder.AppendSingle(alpha, operation.HBase)
+	proof.a = msmBuilder.Execute()
+
+	_, err = encodeVectors(sL, sR, aggParam.g, aggParam.h, msmBuilder)
+	if err != nil {
+		return nil, err
+	}
+	msmBuilder.AppendSingle(rho, operation.HBase)
+	proof.s = msmBuilder.Execute()
 	// challenge y, z
 	y := generateChallenge(aggParam.cs.ToBytesS(), []*operation.Point{proof.a, proof.s})
 	z := generateChallenge(y.ToBytesS(), []*operation.Point{proof.a, proof.s})
@@ -383,12 +387,14 @@ func (wit AggregatedRangeWitness) Prove() (*AggregatedRangeProof, error) {
 	innerProductWit := new(InnerProductWitness)
 	innerProductWit.a = lVector
 	innerProductWit.b = rVector
-	innerProductWit.p, err = encodeVectors(lVector, rVector, aggParam.g, HPrime)
+	uPrime := new(operation.Point).ScalarMult(aggParam.u, operation.HashToScalar(x.ToBytesS()))
+
+	_, err = encodeVectors(lVector, rVector, aggParam.g, HPrime, msmBuilder)
 	if err != nil {
 		return nil, err
 	}
-	uPrime := new(operation.Point).ScalarMult(aggParam.u, operation.HashToScalar(x.ToBytesS()))
-	innerProductWit.p = innerProductWit.p.Add(innerProductWit.p, new(operation.Point).ScalarMult(uPrime, proof.tHat))
+	msmBuilder.AppendSingle(proof.tHat, uPrime)
+	innerProductWit.p = msmBuilder.Execute()
 
 	proof.innerProductProof, err = innerProductWit.Prove(aggParam.g, HPrime, uPrime, x.ToBytesS())
 	if err != nil {
@@ -437,10 +443,10 @@ func (proof AggregatedRangeProof) Verify() (bool, error) {
 
 	LHS := operation.PedCom.CommitAtIndex(proof.tHat, proof.tauX, operation.PedersenValueIndex)
 	RHS := new(operation.Point).ScalarMult(proof.t2, xSquare)
-	RHS.Add(RHS, new(operation.Point).AddPedersen(deltaYZ, operation.PedCom.G[operation.PedersenValueIndex], x, proof.t1))
+	RHS.Add(RHS, operation.NewIdentityPoint().AddPedersen(deltaYZ, operation.PedCom.G[operation.PedersenValueIndex], x, proof.t1))
 
 	expVector := vectorMulScalar(powerVector(z, numValuePad), zSquare)
-	RHS.Add(RHS, new(operation.Point).MultiScalarMult(expVector, cmsValue))
+	RHS.Add(RHS, new(operation.Point).VarTimeMultiScalarMult(expVector, cmsValue))
 
 	if !operation.IsPointEqual(LHS, RHS) {
 		Logger.Log.Errorf("verify aggregated range proof statement 1 failed")
@@ -459,17 +465,17 @@ func (proof AggregatedRangeProof) Verify() (bool, error) {
 			vectorSum[j*maxExp+i].Add(vectorSum[j*maxExp+i], new(operation.Scalar).Mul(z, yVector[j*maxExp+i]))
 		}
 	}
-	tmpHPrime := new(operation.Point).MultiScalarMult(vectorSum, HPrime)
+	tmpHPrime := new(operation.Point).VarTimeMultiScalarMult(vectorSum, HPrime)
 	tmpG := new(operation.Point).Set(aggParam.g[0])
 	for i := 1; i < N; i++ {
 		tmpG.Add(tmpG, aggParam.g[i])
 	}
+
 	ASx := new(operation.Point).Add(proof.a, new(operation.Point).ScalarMult(proof.s, x))
 	P := new(operation.Point).Add(new(operation.Point).ScalarMult(tmpG, zNeg), tmpHPrime)
 	P.Add(P, ASx)
 	P.Add(P, new(operation.Point).ScalarMult(uPrime, proof.tHat))
 	PPrime := new(operation.Point).Add(proof.innerProductProof.p, new(operation.Point).ScalarMult(operation.HBase, proof.mu))
-
 	if !operation.IsPointEqual(P, PPrime) {
 		Logger.Log.Errorf("verify aggregated range proof statement 2-1 failed")
 		return false, errors.New("verify aggregated range proof statement 2-1 failed")
@@ -517,21 +523,19 @@ func (proof AggregatedRangeProof) VerifyFaster() (bool, error) {
 		return false, err
 	}
 	// HPrime = H^(y^(1-i)
-	HPrime := computeHPrime(y, N, aggParam.h)
-	uPrime := new(operation.Point).ScalarMult(aggParam.u, operation.HashToScalar(x.ToBytesS()))
+	HPrime := prepareHPrime(y, N, aggParam.h)
 
+	st1Builder := NewMSMultBuilder(true)
 	// Verify eq (65)
-	LHS := operation.PedCom.CommitAtIndex(proof.tHat, proof.tauX, operation.PedersenValueIndex)
-	RHS := new(operation.Point).ScalarMult(proof.t2, xSquare)
-	RHS.Add(RHS, new(operation.Point).AddPedersen(deltaYZ, operation.PedCom.G[operation.PedersenValueIndex], x, proof.t1))
+	// skip error for Append() calls since lengths are known to match
+	st1Builder.AppendSingle(xSquare, proof.t2)
+	st1Builder.Append([]*operation.Scalar{deltaYZ, x}, []*operation.Point{operation.PedCom.G[operation.PedersenValueIndex], proof.t1})
 	expVector := vectorMulScalar(powerVector(z, numValuePad), zSquare)
-	RHS.Add(RHS, new(operation.Point).MultiScalarMult(expVector, cmsValue))
-	if !operation.IsPointEqual(LHS, RHS) {
-		Logger.Log.Errorf("verify aggregated range proof statement 1 failed")
-		return false, errors.New("verify aggregated range proof statement 1 failed")
-	}
+	st1Builder.Append(expVector, cmsValue)
+	st1Builder.AppendWithMultiplier([]*operation.Scalar{proof.tHat, proof.tauX}, []*operation.Point{operation.PedCom.G[operation.PedersenValueIndex], operation.PedCom.G[operation.PedersenRandomnessIndex]}, operation.NewScalar().Set(operation.ScMinusOne))
 
 	// Verify eq (66)
+	st2Builder := NewMSMultBuilder(true)
 	vectorSum := make([]*operation.Scalar, N)
 	zTmp := new(operation.Scalar).Set(z)
 	for j := 0; j < numValuePad; j++ {
@@ -541,21 +545,19 @@ func (proof AggregatedRangeProof) VerifyFaster() (bool, error) {
 			vectorSum[j*maxExp+i].Add(vectorSum[j*maxExp+i], new(operation.Scalar).Mul(z, yVector[j*maxExp+i]))
 		}
 	}
-	tmpHPrime := new(operation.Point).MultiScalarMult(vectorSum, HPrime)
+	HPrime_vectorSum := HPrime.Clone()
+	for i, v := range vectorSum {
+		HPrime_vectorSum.scalars[i].Mul(HPrime_vectorSum.scalars[i], v)
+	}
+	st2Builder.Append(HPrime_vectorSum.scalars, HPrime_vectorSum.points)
 	tmpG := new(operation.Point).Set(aggParam.g[0])
 	for i := 1; i < N; i++ {
 		tmpG.Add(tmpG, aggParam.g[i])
 	}
-	ASx := new(operation.Point).Add(proof.a, new(operation.Point).ScalarMult(proof.s, x))
-	P := new(operation.Point).Add(new(operation.Point).ScalarMult(tmpG, zNeg), tmpHPrime)
-	P.Add(P, ASx)
-	P.Add(P, new(operation.Point).ScalarMult(uPrime, proof.tHat))
-	PPrime := new(operation.Point).Add(proof.innerProductProof.p, new(operation.Point).ScalarMult(operation.HBase, proof.mu))
-
-	if !operation.IsPointEqual(P, PPrime) {
-		Logger.Log.Errorf("verify aggregated range proof statement 2-1 failed")
-		return false, errors.New("verify aggregated range proof statement 2-1 failed")
-	}
+	st2Builder.AppendSingle(zNeg, tmpG)
+	st2Builder.Append([]*operation.Scalar{operation.NewScalar().FromUint64(1), x}, []*operation.Point{proof.a, proof.s}) // AS^x
+	st2Builder.AppendSingle(operation.NewScalar().Mul(proof.tHat, operation.HashToScalar(x.ToBytesS())), aggParam.u) // tHat.U'
+	st2Builder.AppendWithMultiplier([]*operation.Scalar{operation.NewScalar().FromUint64(1), proof.mu}, []*operation.Point{proof.innerProductProof.p, operation.HBase}, operation.NewScalar().Set(operation.ScMinusOne))
 
 	// Verify eq (68)
 	hashCache := x.ToBytesS()
@@ -590,19 +592,24 @@ func (proof AggregatedRangeProof) VerifyFaster() (bool, error) {
 		}
 	}
 
+	st3Builder := NewMSMultBuilder(true)
 	c := new(operation.Scalar).Mul(proof.innerProductProof.a, proof.innerProductProof.b)
-	tmp1 := new(operation.Point).MultiScalarMult(s, aggParam.g)
-	tmp2 := new(operation.Point).MultiScalarMult(sInverse, HPrime)
-	rightHS := new(operation.Point).Add(tmp1, tmp2)
-	rightHS.Add(rightHS, new(operation.Point).ScalarMult(uPrime, c))
+	st3Builder.Append(s, aggParam.g)
+	HPrime_sInverse := HPrime.Clone()
+	for i, v := range sInverse {
+		HPrime_sInverse.scalars[i].Mul(HPrime_sInverse.scalars[i], v)
+	}
+	st3Builder.Append(HPrime_sInverse.scalars, HPrime_sInverse.points)
+	st3Builder.AppendSingle(operation.NewScalar().Mul(c, operation.HashToScalar(x.ToBytesS())), aggParam.u) // cU'
+	rhsBuilder := NewMSMultBuilder(true)
+	rhsBuilder.Append(vSquareList, L)
+	rhsBuilder.Append(vInverseSquareList, R)
+	rhsBuilder.AppendSingle(operation.NewScalar().FromUint64(1), proof.innerProductProof.p)
+	st3Builder.AppendWithMultiplier(rhsBuilder.scalars, rhsBuilder.points, operation.NewScalar().Set(operation.ScMinusOne))
 
-	tmp3 := new(operation.Point).MultiScalarMult(vSquareList, L)
-	tmp4 := new(operation.Point).MultiScalarMult(vInverseSquareList, R)
-	leftHS := new(operation.Point).Add(tmp3, tmp4)
-	leftHS.Add(leftHS, proof.innerProductProof.p)
-
-	res := operation.IsPointEqual(rightHS, leftHS)
-	if !res {
+	st1Builder.AppendWithMultiplier(st2Builder.scalars, st2Builder.points, operation.RandomScalar())
+	st1Builder.AppendWithMultiplier(st3Builder.scalars, st3Builder.points, operation.RandomScalar())
+	if !st1Builder.Execute().IsIdentity() {
 		Logger.Log.Errorf("verify aggregated range proof statement 2 failed")
 		return false, errors.New("verify aggregated range proof statement 2 failed")
 	}
